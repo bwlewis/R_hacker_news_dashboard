@@ -1,0 +1,131 @@
+---
+title: "Hacker News Dashboard"
+output: flexdashboard::flex_dashboard
+runtime: shiny
+---
+
+
+```{r setup, include=FALSE}
+library(jsonlite)
+library(wordcloud)
+library(tm)
+library(magrittr)
+library(DT)
+
+# Basic Hacker News API functions
+# Get the ID of the newest post (all posts, comments, stories, etc.)
+latest <- function() 
+  tryCatch(fromJSON("https://hacker-news.firebaseio.com/v0/maxitem.json"), error=function(e) Inf)
+# Get a list of most recent news story IDs (stories only)
+newstories <- function() 
+  tryCatch(fromJSON("https://hacker-news.firebaseio.com/v0/newstories.json"), error=function(e) c())
+
+# a utility function
+null2c <- function(x) ifelse(is.null(x), "", x)
+
+# Retrieve an item by ID
+item <- function (id) 
+{
+  if(is.null(id)) return(NULL)
+  url <- sprintf("https://hacker-news.firebaseio.com/v0/item/%.0f.json", id)
+  fromJSON(url)
+}
+
+# Color palette computed with RColorBrewer: brewer.pal(9,"BuGn")
+pal <- c("#66C2A4", "#41AE76", "#238B45", "#006D2C", "#00441B")
+
+# Disable warnings (wordcloud warns a lot)
+options(warn=-1)
+
+# Startup: collect N most recent stories and total post rate
+N <- 50
+state <- reactiveValues(stories=Map(item, newstories()[1:N]),
+                        latest=latest(),
+                        rate=NA,
+                        time=Sys.time())
+```
+
+Rates {data-width=200}
+-------------------------------------------------------------------------------
+```{r}
+# Maintain a window of the N-most recent hacker news stories.
+observe({
+  isolate({
+    id <- newstories()
+    previous_max_id <- Reduce(function(x, y) list(id=max(x$id, y$id)), state$stories)$id
+    id <- id[id > previous_max_id]
+    d <- N - length(id)
+    if(d > 0 && d < N)    # some stories in window are new
+    {
+      state$stories[(d + 1):N] <- Map(item, id)
+    } else if (d <= 0)    # all stories in window are new
+    {
+      state$stories <- Map(item, id)
+    }                     # case d == N does nothing (no new stories)
+    dt <-  60 * as.numeric(difftime(Sys.time(), state$time, units="secs"))
+    state$time <- Sys.time()
+    state$latest <- latest()
+  })
+ invalidateLater(30000)   # update in 30 seconds or so
+})
+
+
+# Simulate a shiny dashboard 'valueBox'
+# idea: change color based on rate
+renderUI({
+  col <- "blue"
+  x <- 10 / (diff(Reduce(
+                   function(x, y) list(time=range(x$time, y$time)), 
+                   state$stories)$time) / 60)
+  HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: %s; font-size: 32px;'>%.2f stories  / minute</div>", col, x))
+})
+
+
+renderUI({
+  col <- "#FFA500"
+  HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: %s; font-size: 32px;'>%.2f total posts / minute</div>", col, state$rate))
+})
+
+renderUI({
+  col <- "black"
+  HTML(sprintf("<div style='text-align: center; color: white; background-color: %s; font-size: 32px;'>%s</div>", col, state$time))
+})
+```
+
+This dashboard uses the Hacker News Firebase API https://github.com/HackerNews/API.
+
+Data
+-------------------------------------------------------------------------------
+### Wordcloud from latest stories
+```{r}
+renderPlot({
+  hack <- Corpus(VectorSource(lapply(state$stories, function(x) tolower(x$title)))) %>%
+            tm_map(removePunctuation) %>%
+            tm_map(removeNumbers) %>%
+            tm_map(function(x) removeWords(x, stopwords("SMART")))
+  
+  tdm <- TermDocumentMatrix(hack)
+  m   <- as.matrix(tdm)
+  v   <- sort(rowSums(m), decreasing=TRUE)
+  d   <- data.frame(word=names(v), freq=v)
+  wordcloud(d$word, d$freq, scale=c(4,.05), min.freq=1, max.words=100, colors=pal)
+})
+```
+
+### Latest stories
+
+```{r}
+renderDataTable({
+ df <-  Reduce(rbind,
+          lapply(state$stories, function(x) 
+            data.frame(id=null2c(x$id),
+                       Author=null2c(x$by),
+                       Score=null2c(x$score),
+                       Title=null2c(x$title),
+                       Url=null2c(x$url)
+  )))
+ df[order(df$id, decreasing=TRUE), -1]
+})
+```
+
+
