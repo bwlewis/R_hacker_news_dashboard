@@ -1,5 +1,5 @@
 message("Interactive stand-alone experiments for a Hacker News dashboard\n
-# Wordcloud of the most recent new stories
+# Wordcloud of the top or new story titles
 # Rate of new story postings
 # Positive/negative main comment sentiment of top stories
 # Overall comment mood of top stories
@@ -28,9 +28,8 @@ load("example.rdata")
 #top <- Map(function(x) item(x), topstories()[1:N])
 #new <- Map(function(x) item(x), newstories()[1:N])
 
-
-library(jsonlite)
 library(wordcloud)
+library(jsonlite)
 library(tm)
 library(Matrix)
 library(irlba)
@@ -156,8 +155,5 @@ clust <- function(x, centers=3)
   points(s$u[, 1], s$u[, d + 1], col=col, cex=4, pch=19) # fill
   points(s$u[, 1], s$u[, d + 1], pch=1, cex=4, col="#00000055") # stroke
   text(k$centers[,1], k$centers[,2], labels=topics, cex=2.5)
-# manually plot Voronoi tesselation using v[[2]] coordinates, also shrink text coordinates
-# to the Voronoi center...xxx
   par(p)
-  k
 }

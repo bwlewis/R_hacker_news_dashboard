@@ -1,90 +1,174 @@
 ---
-title: "Hacker News Dashboard"
+title: "Hacker News Topics and Sentiment"
 output: flexdashboard::flex_dashboard
 runtime: shiny
 ---
 
-
 ```{r setup, include=FALSE}
 library(jsonlite)
-library(wordcloud)
 library(tm)
-library(magrittr)
-library(DT)
+library(Matrix)
+library(irlba)
+library(deldir)
+
+# words: list of positive/negatve words from https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html
+# example: ready-to go populated HN stories example for testing
+# can either use local repository files or the indicated url
+load(url("http://illposed.net/words.rdata"))
+load(url("http://illposed.net/example.rdata"))
 
 # Basic Hacker News API functions
 # Get the ID of the newest post (all posts, comments, stories, etc.)
 latest <- function() 
   tryCatch(fromJSON("https://hacker-news.firebaseio.com/v0/maxitem.json"), error=function(e) Inf)
-# Get a list of most recent news story IDs (stories only)
-newstories <- function() 
-  tryCatch(fromJSON("https://hacker-news.firebaseio.com/v0/newstories.json"), error=function(e) c())
 topstories <- function() 
   tryCatch(fromJSON("https://hacker-news.firebaseio.com/v0/topstories.json"), error=function(e) c())
 
-# a utility function
-null2c <- function(x) ifelse(is.null(x), "", x)
-
-# Retrieve an item by ID
-item <- function (id) 
-{
-  if(is.null(id)) return(NULL)
-  url <- sprintf("https://hacker-news.firebaseio.com/v0/item/%.0f.json", id)
-  fromJSON(url)
-}
-
-# Color palette computed with RColorBrewer: brewer.pal(9,"BuGn")
-pal <- c("#66C2A4", "#41AE76", "#238B45", "#006D2C", "#00441B")
-
-# Disable warnings (wordcloud warns a lot)
-options(warn=-1)
-
-# Startup: collect N most recent stories
-N <- 50
-state <- reactiveValues(stories=Map(item, newstories()[1:N]),
+# number of top and new stories to download. Small N is faster but
+# less interesting :( Warning! The HN API can bog down sometimes.
+N <- 100
+# Initialize
+# Sentiment scale
+mood <- c("pissed off", "cranky", "chill", "into it", "stoked")
+#state <- reactiveValues(stories=Map(item, topstories()[1:N]),
+state <- reactiveValues(stories=top,
+                        mood=3,
                         latest=latest(),
                         rate=NA,
                         time=Sys.time())
+
+
+# Support functions follow...
+# Process the character value x to remove numbers, punctuation, repeated spaces and stopwords.
+clean <- function(x)
+{
+  x <- unlist(strsplit(tolower(gsub("[[:punct:][:digit:]]", "", x)), " "))
+  gsub("^ *|(?<= ) | *$", "", Reduce(paste, x[is.na(match(x, stopwords("SMART")))]), perl=TRUE)
+}
+
+# Retrieve an item by ID and lightly process the title to remove
+# numbers, punctuation and stopwords.
+item <- function (id)
+{
+  if(is.null(id)) return(NULL)
+  url <- sprintf("https://hacker-news.firebaseio.com/v0/item/%.0f.json", id)
+  ans <- tryCatch(fromJSON(url), error=function(e) list())
+  ans$title <- clean(ans$title)
+  s <- sentiment(ans)
+  ans$sentiment <- s$score
+  ans$comments <- s$comments
+  ans
+}
+
+# collect main comments for a story x and return a really basic sentiment score.
+# Follows the simple approach outlined in:
+# https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html#lexicon
+# and
+# http://www.slideshare.net/jeffreybreen/r-by-example-mining-twitter-for/12-Load_sentiment_word_lists1_Download
+# The API is slow, so we limit this to top 10 comments.
+sentiment <- function(x)
+{
+  if(is.null(x$kids)) return(list(score=0, comments=""))
+  kids <- head(x$kids, 10)
+  comments <- clean(Reduce(paste, Map(function(y) {z <- item(y); paste(z$text, z$title)}, kids)))
+  v <- unlist(strsplit(comments, " "))
+  score <- sum(match(v, words$positive, 0) > 0) - sum(match(v, words$negative, 0) > 0)
+  list(score=score, comments=comments)
+}
+
+# plot clusters of story title concepts from the supplied news item list
+# "latent semantic analysis lite"
+# Returns the kmeans cluster output
+clust <- function(x, centers=3)
+{
+  titles <- Map(function(y) y$title, x)
+  y <- DocumentTermMatrix(Corpus(VectorSource(titles)))
+  y <- sparseMatrix(i=y$i, j=y$j, x=y$v)  # convert to a numeric sparse matrix
+  s <- irlba(y, nu=3, nv=3, center=Matrix::colMeans(y)) # principal components
+  # pick a good 2d clustering out of the three dimensions
+  k <- list(kmeans(s$u[, 1:2], centers=centers, nstart=500))
+  k <- c(k, list(kmeans(s$u[, c(1,3)], centers=3, nstart=100)))
+  d <- which.max(unlist(Map(function(x) x$betweenss / x$totss, k)))[1]
+  k <- k[[d]]
+   
+  # establish dominant small phrases or words in each cluster
+  titles <- unlist(titles)
+  topics <- Map(function(i)
+  {
+    t <- table(unlist(
+          Map(function(x) paste(x, collapse=" "),
+            ngrams(Reduce(c, Map(function(y) unlist(strsplit(y, " ")),
+              titles[which(k$cluster == i)])), 2))))
+    names(t)[t == max(t)][[1]]
+  }, seq(1, centers))
+  # Flag a really big cluster
+  p <- k$size / length(k$cluster)
+  if(max(p) > 0.66) topics[which.max(p)] <- sprintf("%s\nand other stuff", topics[which.max(p)])
+
+  p <- par(mar=c(0, 0, 0, 0))
+  # Sentiment colors: Map the (unbounded) sentiment values into the integer
+  # interval [1,10] to index colors
+  idx <- floor(unlist(Map(function(y) 1 / (1 + exp(-y$sentiment)), x)) * 9) + 1
+  col <- sprintf("%s95",
+                 colorRampPalette(c("red", "gray", "blue"), alpha=FALSE)(10))[idx]
+  k$xlim <- 1.2 * range(s$u[, 1])
+  k$ylim <- 1.2 * range(s$u[, d + 1])
+  v <- deldir(k$centers[,1], k$centers[, 2], rw=2 * c(k$xlim, k$ylim))
+  tilecol <- rainbow(length(k$size), alpha=0.1)
+  plot(s$u[, 1], s$u[, d + 1], col=0, pch=1,
+       xaxt="n", yaxt="n", xlab="", ylab="", xlim=k$xlim, ylim=k$ylim)
+  plot(tile.list(v), fillcol=tilecol, showpoints=FALSE, asp=NA, add=TRUE)
+#  points(s$u[, 1], s$u[, d + 1], col=col, cex=4, pch=19) # fill
+  points(s$u[, 1], s$u[, d + 1], col=col, cex=4, pch=19) # fill
+  points(s$u[, 1], s$u[, d + 1], pch=1, cex=4, col="#00000055") # stroke
+  text(k$centers[,1], k$centers[,2], labels=topics, cex=2.5)
+  par(p)
+}
+
+
+
+
 ```
 
 Rates {data-width=200}
 -------------------------------------------------------------------------------
 ```{r}
-# Maintain a window of the N-most recent hacker news stories.
+# 1. Update the current posting rate.
+# 2. Maintain a window of the N-most recent hacker news stories.
+# 3. Update the current overall mood
 observe({
   isolate({
-    id <- newstories()
-    previous_max_id <- Reduce(function(x, y) list(id=max(x$id, y$id)), state$stories)$id
-    id <- id[id > previous_max_id]
-    d <- N - length(id)
-    if(d > 0 && d < N)    # some stories in window are new
+    # update the current posting rate
+    time <- Sys.time()
+    id   <- latest()
+    dt   <- as.numeric(difftime(time, state$time, units="secs"))
+    state$rate <- 60 * (id - state$latest) / dt
+    state$time <- time
+    # update the top news stories
+    if(dt > 3000) # debugging, disable story update
     {
-      state$stories[(d + 1):N] <- Map(item, id)
-    } else if (d <= 0)    # all stories in window are new
-    {
-      state$stories <- Map(item, id)
-    }                     # case d == N does nothing (no new stories)
-    state$time <- Sys.time()
-    state$latest <- latest()
+      id <- topstories()[1:N]
+      # identify indices of new top stories that will replace older ones
+      i <- is.na(match(id, unlist(Map(function(x) x$id, top))))
+      if(any(i))
+      {
+        # replace the old stories
+        state$stories[i] <- Map(item, id[i])
+      }
+    }
+    # update the current overall mood
+    state$mood <- floor(4/(1 + exp(-Reduce(sum, Map(function(x) x$sentiment, top))))) + 1  
   })
  invalidateLater(30000)   # update in 30 seconds or so
 })
 
 
-# Simulate a shiny dashboard 'valueBox'
-# idea: change color based on rate
+# Simulate shiny dashboard 'valueBox'
 renderUI({
-  col <- "blue"
-  x <- 10 / (diff(Reduce(
-                   function(x, y) list(time=range(x$time, y$time)), 
-                   state$stories)$time) / 60)
-  HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: %s; font-size: 32px;'>%.2f stories  / minute</div>", col, x))
+  HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: blue; font-size: 32px;'>%0.3f total posts / minute</div>", state$rate))
 })
-
-
 renderUI({
-  col <- "#FFA500"
-  HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: %s; font-size: 32px;'>%.2f total posts / minute</div>", col, state$rate))
+  HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: #AA6600; font-size: 32px;'>%s</div>", mood[state$mood]))
 })
 ```
 
@@ -92,36 +176,9 @@ This dashboard uses the Hacker News Firebase API https://github.com/HackerNews/A
 
 Data
 -------------------------------------------------------------------------------
-### Wordcloud from latest stories
+### Top stories topic clusters and sentiment
 ```{r}
 renderPlot({
-  hack <- Corpus(VectorSource(lapply(state$stories, function(x) tolower(x$title)))) %>%
-            tm_map(removePunctuation) %>%
-            tm_map(removeNumbers) %>%
-            tm_map(function(x) removeWords(x, stopwords("SMART")))
-  
-  tdm <- TermDocumentMatrix(hack)
-  m   <- as.matrix(tdm)
-  v   <- sort(rowSums(m), decreasing=TRUE)
-  d   <- data.frame(word=names(v), freq=v)
-  wordcloud(d$word, d$freq, scale=c(4,.05), min.freq=1, max.words=100, colors=pal)
+  clust(state$stories, 7)
 })
 ```
-
-### Latest stories
-
-```{r}
-renderDataTable({
- df <-  Reduce(rbind,
-          lapply(state$stories, function(x) 
-            data.frame(id=null2c(x$id),
-                       Author=null2c(x$by),
-                       Score=null2c(x$score),
-                       Title=null2c(x$title),
-                       Url=null2c(x$url)
-  )))
- df[order(df$id, decreasing=TRUE), -1]
-})
-```
-
-
