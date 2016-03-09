@@ -19,6 +19,8 @@ latest <- function()
 # Get a list of most recent news story IDs (stories only)
 newstories <- function() 
   tryCatch(fromJSON("https://hacker-news.firebaseio.com/v0/newstories.json"), error=function(e) c())
+topstories <- function() 
+  tryCatch(fromJSON("https://hacker-news.firebaseio.com/v0/topstories.json"), error=function(e) c())
 
 # a utility function
 null2c <- function(x) ifelse(is.null(x), "", x)
@@ -37,7 +39,7 @@ pal <- c("#66C2A4", "#41AE76", "#238B45", "#006D2C", "#00441B")
 # Disable warnings (wordcloud warns a lot)
 options(warn=-1)
 
-# Startup: collect N most recent stories and total post rate
+# Startup: collect N most recent stories
 N <- 50
 state <- reactiveValues(stories=Map(item, newstories()[1:N]),
                         latest=latest(),
@@ -62,7 +64,6 @@ observe({
     {
       state$stories <- Map(item, id)
     }                     # case d == N does nothing (no new stories)
-    dt <-  60 * as.numeric(difftime(Sys.time(), state$time, units="secs"))
     state$time <- Sys.time()
     state$latest <- latest()
   })
@@ -84,11 +85,6 @@ renderUI({
 renderUI({
   col <- "#FFA500"
   HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: %s; font-size: 32px;'>%.2f total posts / minute</div>", col, state$rate))
-})
-
-renderUI({
-  col <- "black"
-  HTML(sprintf("<div style='text-align: center; color: white; background-color: %s; font-size: 32px;'>%s</div>", col, state$time))
 })
 ```
 
