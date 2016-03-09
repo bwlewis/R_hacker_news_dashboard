@@ -10,7 +10,7 @@ message("Interactive stand-alone experiments for a Hacker News dashboard\n
 source('cazart.R')
 load('example.rdata')
 titlecloud(new)
-clust(c(new, top))
+clust(top)
 
 # These are just some experiments. See the shiny app for a full implementation.")
 
@@ -18,12 +18,15 @@ clust(c(new, top))
 # less interesting :(.
 N <- 100
 
-# Startup: load N new and top stories, add a progress bar?  The HN API can be
+# Example data
+load("example.rdata")
+
+# Live data: load N new and top stories, add a progress bar?  The HN API can be
 # very slow sometimes. However once loaded, we can just update the list adding
 # new stories and ejecting old ones. Should be faster once in that phase...
-#new <- Map(function(x) item(x), newstories()[1:N])
+
 #top <- Map(function(x) item(x), topstories()[1:N])
-load("example.rdata")
+#new <- Map(function(x) item(x), newstories()[1:N])
 
 
 library(jsonlite)
@@ -118,7 +121,7 @@ clust <- function(x, centers=3)
   y <- sparseMatrix(i=y$i, j=y$j, x=y$v)  # convert to a numeric sparse matrix
   s <- irlba(y, nu=3, nv=3, center=colMeans(y)) # principal components
   # pick the best 2d clustering we get from the three dimensions
-  k <- list(kmeans(s$u[, 1:2], centers=centers, nstart=100))
+  k <- list(kmeans(s$u[, 1:2], centers=centers, nstart=500))
   k <- c(k, list(kmeans(s$u[, c(1,3)], centers=3, nstart=100)))
   d <- which.max(unlist(Map(function(x) x$betweenss / x$totss, k)))[1]
   k <- k[[d]]
@@ -137,49 +140,24 @@ clust <- function(x, centers=3)
   if(max(p) > 0.66) topics[which.max(p)] <- sprintf("%s\nand other stuff", topics[which.max(p)])
 
   p <- par(mar=c(0, 0, 0, 0))
-  # colors for negative, neutral, positive sentiment
-  # Map the sentiment values into the integer interval [9,89] to index colors,
-  # (smaller values = more negative sentiment).
-  idx <- floor(unlist(Map(function(y) 1 / (1 + exp(-y$sentiment)), x)) * 80) + 9
-  col <- sprintf("%sAA", colorRampPalette(brewer.pal(10, "RdBu"), space="Lab")(100))[idx]
+  # Sentiment colors: Map the (unbounded) sentiment values into the integer
+  # interval [1,10] to index colors
+  idx <- floor(unlist(Map(function(y) 1 / (1 + exp(-y$sentiment)), x)) * 9) + 1
+  col <- sprintf("%s95",
+                 colorRampPalette(c("red", "gray", "blue"), alpha=FALSE)(10))[idx]
   k$xlim <- 1.2 * range(s$u[, 1])
   k$ylim <- 1.2 * range(s$u[, d + 1])
-  plot(s$u[, 1], s$u[, d + 1], col=0, pch=1, xaxt="n", yaxt="n", xlab="", ylab="", xlim=k$xlim, ylim=k$ylim)
-  voroni(k)
+  v <- deldir(k$centers[,1], k$centers[, 2], rw=2 * c(k$xlim, k$ylim))
+  tilecol <- rainbow(length(k$size), alpha=0.1)
+  plot(s$u[, 1], s$u[, d + 1], col=0, pch=1,
+       xaxt="n", yaxt="n", xlab="", ylab="", xlim=k$xlim, ylim=k$ylim)
+  plot(tile.list(v), fillcol=tilecol, showpoints=FALSE, asp=NA, add=TRUE)
+#  points(s$u[, 1], s$u[, d + 1], col=col, cex=4, pch=19) # fill
   points(s$u[, 1], s$u[, d + 1], col=col, cex=4, pch=19) # fill
-  points(s$u[, 1], s$u[, d + 1], pch=1, cex=4, col="#00000032") # stroke
-  text(k$centers[,1], k$centers[,2], labels=topics, cex=3, col="#000000DD")
+  points(s$u[, 1], s$u[, d + 1], pch=1, cex=4, col="#00000055") # stroke
+  text(k$centers[,1], k$centers[,2], labels=topics, cex=2.5)
 # manually plot Voronoi tesselation using v[[2]] coordinates, also shrink text coordinates
 # to the Voronoi center...xxx
   par(p)
   k
-}
-
-
-# A custom Voronoi plot based on the deldir package
-voroni <- function(k)
-{
-  v <- deldir(k$centers[,1], k$centers[, 2])[[2]]
-  m <- (v$y2 - v$y1) / (v$x2 - v$x1)     # slopes
-  b <- v$y1 - m * v$x1                   # intercepts
-  x <- c(v$x1, v$x2)
-  xcenter <- x[which.max(tabulate(match(x, unique(x))))]
-  V <- as.matrix(v[, 1:4])
-# Extend the deldir line segment coordinates beyond the plot edge
-  i <- (V[,1] == xcenter) * 2 + 1
-  j <- (V[,1] != xcenter) * 2 + 1
-  lim <- apply(cbind(abs(V[matrix(c(1:3, i), nrow=3)] - min(k$xlim)), abs(V[matrix(c(1:3, i), nrow=3)] - max(k$xlim))), 1, which.min)
-  V[matrix(c(1:3, i), nrow=3)] <- 10 * k$xlim[lim]
-  V[matrix(c(1:3, i + 1), nrow=3)] <- m * 10 * k$xlim[lim] + b
-# Fill polygons
-  col <- rainbow(nrow(V), alpha=0.1)
-  for(m in 1:nrow(V))
-  {
-    n <- m + 1
-    if(n > nrow(V)) n <- 1
-    idx <- c(j[m], i[m], i[n], j[n])
-    x <- V[matrix(c(rep(m, 2), rep(n, 2), idx), 4)]
-    y <- V[matrix(c(rep(m, 2), rep(n, 2), idx + 1), 4)]
-    polygon(x, y, col=col[m], lty=2)
-  }
 }
