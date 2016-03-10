@@ -191,9 +191,10 @@ server <- function(input, output)
     if(!is.null(input$plot_click))
     {
       i <- which.min((state$xy$x - input$plot_click$x)^2 + (state$xy$y - input$plot_click$y)^2)
-      HTML(sprintf("<h2>%s</h2><h3><a target='_blank' href='%s'>%s</a></h3>",
+      HTML(sprintf("<h2>%s</h2><h3><a target='_blank' href='%s'>%s</a></h3><h3>Top ranked comments sentiment: %d</h3>",
                    state$stories[[i]]$raw_title,
-                   state$stories[[i]]$url, state$stories[[i]]$url))
+                   state$stories[[i]]$url, state$stories[[i]]$url, state$stories[[i]]$sentiment)
+      )
     }
   })
 
