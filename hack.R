@@ -122,7 +122,7 @@ clust <- function(x, centers=3)
   tilecol <- rainbow(length(k$size), alpha=0.1)
   plot(s$u[, 1], s$u[, d + 1], col=0, pch=1,
        xaxt="n", yaxt="n", xlab="", ylab="", xlim=k$xlim, ylim=k$ylim)
-  plot(tile.list(v), fillcol=tilecol, showpoints=FALSE, asp=NA, add=TRUE)
+  plot(tile.list(v), fillcol=tilecol, showpoints=FALSE, asp=NA, add=TRUE, border="#FFFFFF00")
   isolate({state$xy <- data.frame(x=s$u[, 1], y=s$u[, d + 1])})
   points(s$u[, 1], s$u[, d + 1], col=col, cex=4, pch=19) # fill
   points(s$u[, 1], s$u[, d + 1], pch=1, cex=4, col="#00000055") # stroke
@@ -192,7 +192,7 @@ server <- function(input, output)
     invalidateLater(30000)   # update in 30 seconds or so
   })
 
-  output$dygraph <- renderDygraph({dygraph(state$rate_history)})
+  output$dygraph <- renderDygraph({dygraph(state$rate_history, xlab="approximate time (minutes)", ylab="post rate")})
 
   output$links <- renderUI({
     if(!is.null(input$plot_click))
