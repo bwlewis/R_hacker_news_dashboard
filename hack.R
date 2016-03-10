@@ -165,15 +165,17 @@ server <- function(input, output)
         {
           # replace the old stories
            t0 <- proc.time()
+           k <- 0
            withProgress({
              for(j in head(which(i), 5))  # limit updates to 5 at a time 'cause it's so slow
              {
                state$stories[[j]] <- item(id[j])
                incProgress(1)
+               k <- k + 1
              }
            }, min=0, max=sum(i), value=0, message = "Updating news stories...")
            dt <- (proc.time() - t0)[3]
-           output$info <- renderUI({sprintf("Updated %d out of %d old stories in %.3f seconds.", j, sum(i), dt)})
+           output$info <- renderUI({sprintf("Updated %d out of %d old stories in %.3f seconds.", k, sum(i), dt)})
         }
       }
       # update the current overall mood
