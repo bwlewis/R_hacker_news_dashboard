@@ -1,10 +1,5 @@
----
-title: "Hacker News Topics and Sentiment"
-output: flexdashboard::flex_dashboard
-runtime: shiny
----
-
-```{r setup, include=FALSE}
+library(shiny)
+library(dygraphs)
 library(jsonlite)
 library(tm)
 library(Matrix)
@@ -27,16 +22,20 @@ topstories <- function()
 # number of top and new stories to download. Small N is faster but
 # less interesting :( Warning! The HN API can bog down sometimes.
 N <- 100
+# Because the API is a bit slow, we limit the number of top comments used
+# to compute sentiment
+COMMENT_LIMIT <- 20
 # Initialize
 # Sentiment scale
 mood <- c("pissed off", "cranky", "chill", "into it", "stoked")
-#state <- reactiveValues(stories=Map(item, topstories()[1:N]),
 state <- reactiveValues(stories=top,
                         mood=3,
+                        mood_raw=0,
                         latest=latest(),
                         rate=NA,
+                        rate_history=data.frame(dt=0, rate=0),
+                        xy=data.frame(x=0, y=0),
                         time=Sys.time())
-
 
 # Support functions follow...
 # Process the character value x to remove numbers, punctuation, repeated spaces and stopwords.
@@ -48,13 +47,14 @@ clean <- function(x)
 
 # Retrieve an item by ID and lightly process the title to remove
 # numbers, punctuation and stopwords.
-item <- function (id)
+item <- function (id, recursive=TRUE)
 {
   if(is.null(id)) return(NULL)
   url <- sprintf("https://hacker-news.firebaseio.com/v0/item/%.0f.json", id)
   ans <- tryCatch(fromJSON(url), error=function(e) list())
+  ans$raw_title <- ans$title
   ans$title <- clean(ans$title)
-  s <- sentiment(ans)
+  s <- ifelse(recursive, sentiment(ans), list(score=0, comments=""))
   ans$sentiment <- s$score
   ans$comments <- s$comments
   ans
@@ -65,12 +65,11 @@ item <- function (id)
 # https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html#lexicon
 # and
 # http://www.slideshare.net/jeffreybreen/r-by-example-mining-twitter-for/12-Load_sentiment_word_lists1_Download
-# The API is slow, so we limit this to top 10 comments.
 sentiment <- function(x)
 {
   if(is.null(x$kids)) return(list(score=0, comments=""))
-  kids <- head(x$kids, 10)
-  comments <- clean(Reduce(paste, Map(function(y) {z <- item(y); paste(z$text, z$title)}, kids)))
+  kids <- head(x$kids, COMMENT_LIMIT)
+  comments <- clean(Reduce(paste, Map(function(y) {z <- item(y, FALSE); paste(z$text, z$title)}, kids)))
   v <- unlist(strsplit(comments, " "))
   score <- sum(match(v, words$positive, 0) > 0) - sum(match(v, words$negative, 0) > 0)
   list(score=score, comments=comments)
@@ -78,7 +77,6 @@ sentiment <- function(x)
 
 # plot clusters of story title concepts from the supplied news item list
 # "latent semantic analysis lite"
-# Returns the kmeans cluster output
 clust <- function(x, centers=3)
 {
   titles <- Map(function(y) y$title, x)
@@ -108,7 +106,8 @@ clust <- function(x, centers=3)
   p <- par(mar=c(0, 0, 0, 0))
   # Sentiment colors: Map the (unbounded) sentiment values into the integer
   # interval [1,10] to index colors
-  idx <- floor(unlist(Map(function(y) 1 / (1 + exp(-y$sentiment)), x)) * 9) + 1
+  snmt <- unlist(Map(function(y) y$sentiment, x))
+  idx <- floor((1 / (1 + exp(- snmt))) * 9) + 1
   col <- sprintf("%s95",
                  colorRampPalette(c("red", "gray", "blue"), alpha=FALSE)(10))[idx]
   k$xlim <- 1.2 * range(s$u[, 1])
@@ -118,7 +117,7 @@ clust <- function(x, centers=3)
   plot(s$u[, 1], s$u[, d + 1], col=0, pch=1,
        xaxt="n", yaxt="n", xlab="", ylab="", xlim=k$xlim, ylim=k$ylim)
   plot(tile.list(v), fillcol=tilecol, showpoints=FALSE, asp=NA, add=TRUE)
-#  points(s$u[, 1], s$u[, d + 1], col=col, cex=4, pch=19) # fill
+  isolate({state$xy <- data.frame(x=s$u[, 1], y=s$u[, d + 1])})
   points(s$u[, 1], s$u[, d + 1], col=col, cex=4, pch=19) # fill
   points(s$u[, 1], s$u[, d + 1], pch=1, cex=4, col="#00000055") # stroke
   text(k$centers[,1], k$centers[,2], labels=topics, cex=2.5)
@@ -126,59 +125,88 @@ clust <- function(x, centers=3)
 }
 
 
+ui <- pageWithSidebar(
+        headerPanel("Hacker News Top Stories Topic Clusters and Sentiment"),
+        sidebarPanel(
+          uiOutput("ui_rate"),
+          uiOutput("ui_mood"),
+          dygraphOutput("dygraph"),
+          sliderInput("nclust", "Number of clusters:", min=3, max=7, value=5),
+          uiOutput("links"),
+          uiOutput("info")
+        ),
+        mainPanel(
+          plotOutput("plot1", height=800, click="plot_click"),
+          h3("Points are color-coded by sentiment from red (negative) to grayish (neutral) to blue (positive). Click on points to see article titles and links. Data refresh about every 30s.")
+        ))
 
-
-```
-
-Rates {data-width=200}
--------------------------------------------------------------------------------
-```{r}
-# 1. Update the current posting rate.
-# 2. Maintain a window of the N-most recent hacker news stories.
-# 3. Update the current overall mood
-observe({
-  isolate({
-    # update the current posting rate
-    time <- Sys.time()
-    id   <- latest()
-    dt   <- as.numeric(difftime(time, state$time, units="secs"))
-    state$rate <- 60 * (id - state$latest) / dt
-    state$time <- time
-    # update the top news stories
-    if(dt > 3000) # debugging, disable story update
-    {
-      id <- topstories()[1:N]
-      # identify indices of new top stories that will replace older ones
-      i <- is.na(match(id, unlist(Map(function(x) x$id, top))))
-      if(any(i))
+server <- function(input, output) {
+  obs <- observe({
+    isolate({
+      # update the current posting rate
+      time <- Sys.time()
+      id   <- latest()
+      dt   <- as.numeric(difftime(time, state$time, units="secs"))
+      # wait a while to begin the (sometimes slow) update process
+      update <- nrow(state$rate_history) > 1
+      state$rate <- 60 * (id - state$latest) / dt
+      state$time <- time
+      state$rate_history$dt <- state$rate_history$dt - dt/60  # (in minutes)
+      state$rate_history <- rbind(state$rate_history, data.frame(dt=0, rate=state$rate))
+      if(nrow(state$rate_history) > 100) state$rate_history <- tail(state$rate_history, 100)
+      # update the top news stories
+      if(update)
       {
-        # replace the old stories
-        state$stories[i] <- Map(item, id[i])
+        id <- topstories()[1:N]
+        # identify indices of new top stories that will replace older ones
+        i <- is.na(match(id, unlist(Map(function(x) x$id, top))))
+        if(any(i))
+        {
+          # replace the old stories
+#          state$stories[i] <- Map(item, id[i])
+           t0 <- proc.time()
+           withProgress({
+             for(j in head(which(i), 5))  # limit updates to 5 at a time 'cause it's so slow
+             {
+               state$stories[[j]] <- item(id[j])
+               incProgress(1)
+             }
+           }, min=0, max=sum(i), value=0, message = "Updating news stories...")
+           dt <- (proc.time() - t0)[3]
+           output$info <- renderUI({sprintf("Updated %d out of %d old stories in %.3f seconds.", j, sum(i), dt)})
+        }
       }
-    }
-    # update the current overall mood
-    state$mood <- floor(4/(1 + exp(-Reduce(sum, Map(function(x) x$sentiment, top))))) + 1  
+      # update the current overall mood
+      state$mood_raw <- Reduce(sum, Map(function(x) x$sentiment, state$stories))
+      state$mood <- floor(4/(1 + exp(- state$mood_raw))) + 1  
+    })
+    invalidateLater(30000)   # update in 30 seconds or so
   })
- invalidateLater(30000)   # update in 30 seconds or so
-})
 
+  output$dygraph <- renderDygraph({dygraph(state$rate_history)})
+
+  output$links <- renderUI({
+    if(!is.null(input$plot_click))
+    {
+      i <- which.min((state$xy$x - input$plot_click$x)^2 + (state$xy$y - input$plot_click$y)^2)
+      HTML(sprintf("<h2>%s</h2><h3><a target='_blank' href='%s'>%s</a></h3>",
+                   state$stories[[i]]$raw_title,
+                   state$stories[[i]]$url, state$stories[[i]]$url))
+    }
+  })
+
+  output$plot1 <- renderPlot({
+    clust(state$stories, input$nclust)
+  })
 
 # Simulate shiny dashboard 'valueBox'
-renderUI({
+output$ui_rate <- renderUI({
   HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: blue; font-size: 32px;'>%0.3f total posts / minute</div>", state$rate))
 })
-renderUI({
-  HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: #AA9900; font-size: 32px;'>%s</div>", mood[state$mood]))
+output$ui_mood <- renderUI({
+  HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: #AA9900; font-size: 32px;'>%s (%d)</div>", mood[state$mood], state$mood_raw))
 })
-```
 
-This dashboard uses the Hacker News Firebase API https://github.com/HackerNews/API.
+}
 
-Data
--------------------------------------------------------------------------------
-### Top stories topic clusters and sentiment
-```{r}
-renderPlot({
-  clust(state$stories, 7)
-})
-```
+print(shinyApp(ui, server))
