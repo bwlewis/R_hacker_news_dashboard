@@ -173,7 +173,7 @@ server <- function(input, output)
            t0 <- proc.time()
            k <- 0
            withProgress({
-             for(j in head(which(i), 30))  # limit updates due to slow API
+             for(j in head(which(i), 15))  # limit updates due to slow API
              {
                state$stories[[j]] <- item(id[j])
                incProgress(1)
