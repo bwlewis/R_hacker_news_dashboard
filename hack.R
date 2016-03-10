@@ -27,9 +27,9 @@ N <- 100
 COMMENT_LIMIT <- 20
 # Initialize
 # Sentiment scale
-mood <- c("pissed off", "cranky", "chill", "into it", "stoked")
+mood <- c("aggro", "cheesed off", "cranky", "chill", "amped", "stoked", "woot")
 state <- reactiveValues(stories=top, # loaded from example.rdata to get started
-                        mood=3,
+                        mood=4,
                         mood_raw=0,
                         latest=latest(),
                         rate=NA,
@@ -186,7 +186,8 @@ server <- function(input, output)
       }
       # update the current overall mood
       state$mood_raw <- Reduce(sum, Map(function(x) x$sentiment, state$stories))
-      state$mood <- floor(4/(1 + exp(- state$mood_raw / 5))) + 1  
+      if(state$mood_raw < 0) state$mood_raw <- state$mood_raw / 10
+      state$mood <- floor(6/(1 + exp(- state$mood_raw))) + 1  
     })
     invalidateLater(30000)   # update in 30 seconds or so
   })
