@@ -28,7 +28,7 @@ COMMENT_LIMIT <- 20
 # Initialize
 # Sentiment scale
 mood <- c("pissed off", "cranky", "chill", "into it", "stoked")
-state <- reactiveValues(stories=top,
+state <- reactiveValues(stories=top, # loaded from example.rdata to get started
                         mood=3,
                         mood_raw=0,
                         latest=latest(),
@@ -140,7 +140,8 @@ ui <- pageWithSidebar(
           h3("Points are color-coded by sentiment from red (negative) to grayish (neutral) to blue (positive). Click on points to see article titles and links. Data refresh about every 30s.")
         ))
 
-server <- function(input, output) {
+server <- function(input, output)
+{
   obs <- observe({
     isolate({
       # update the current posting rate
@@ -159,11 +160,10 @@ server <- function(input, output) {
       {
         id <- topstories()[1:N]
         # identify indices of new top stories that will replace older ones
-        i <- is.na(match(id, unlist(Map(function(x) x$id, top))))
+        i <- is.na(match(id, unlist(Map(function(x) x$id, state$stories))))
         if(any(i))
         {
           # replace the old stories
-#          state$stories[i] <- Map(item, id[i])
            t0 <- proc.time()
            withProgress({
              for(j in head(which(i), 5))  # limit updates to 5 at a time 'cause it's so slow
