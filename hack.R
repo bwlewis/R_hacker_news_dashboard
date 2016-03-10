@@ -73,8 +73,10 @@ sentiment <- function(x)
   kids <- head(x$kids, COMMENT_LIMIT)
   comments <- clean(Reduce(paste, Map(function(y) {z <- item(y, FALSE); paste(z$text, z$title)}, kids)))
   v <- unlist(strsplit(comments, " "))
+  if(length(v) == 0) return(list(score=0, comments=comments))
   score <- sum(match(v, words$positive, 0) > 0) - sum(match(v, words$negative, 0) > 0)
   if(is.null(score)) score <- 0
+  if(is.na(score)) score <- 0
   list(score=score, comments=comments)
 }
 
