@@ -56,7 +56,8 @@ item <- function (id, recursive=TRUE)
   if(is.null(ans$title)) ans$title <- "no title"
   ans$raw_title <- ans$title
   ans$title <- clean(ans$title)
-  s <- ifelse(recursive, sentiment(ans), list(score=0, comments=""))
+  s <- list(score=0, comments="")
+  if(recursive) s <- sentiment(ans)
   ans$sentiment <- s$score
   ans$comments <- s$comments
   ans
@@ -172,7 +173,7 @@ server <- function(input, output)
            t0 <- proc.time()
            k <- 0
            withProgress({
-             for(j in head(which(i), 10))  # limit updates to at most 10 at a time 'cause it's so slow
+             for(j in head(which(i), 30))  # limit updates due to slow API
              {
                state$stories[[j]] <- item(id[j])
                incProgress(1)
