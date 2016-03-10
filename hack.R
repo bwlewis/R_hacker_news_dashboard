@@ -52,6 +52,8 @@ item <- function (id, recursive=TRUE)
   if(is.null(id)) return(NULL)
   url <- sprintf("https://hacker-news.firebaseio.com/v0/item/%.0f.json", id)
   ans <- tryCatch(fromJSON(url), error=function(e) list())
+  if(is.null(ans$url)) ans$url <- "https://news.ycombinator.com/"
+  if(is.null(ans$title)) ans$title <- "no title"
   ans$raw_title <- ans$title
   ans$title <- clean(ans$title)
   s <- ifelse(recursive, sentiment(ans), list(score=0, comments=""))
