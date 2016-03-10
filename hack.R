@@ -142,7 +142,7 @@ ui <- pageWithSidebar(
         ),
         mainPanel(
           plotOutput("plot1", height=800, click="plot_click"),
-          h3("Points are color-coded by sentiment from red (negative) to grayish (neutral) to blue (positive). Click on points to see article titles and links. Data refresh about every 30s.")
+          h3("Points are color-coded by sentiment from red (negative) to grayish (neutral) to blue (positive). Click on points to see article titles and links. Data refresh gradually about every 30s.")
         ))
 
 server <- function(input, output)
@@ -185,7 +185,7 @@ server <- function(input, output)
       }
       # update the current overall mood
       state$mood_raw <- Reduce(sum, Map(function(x) x$sentiment, state$stories))
-      state$mood <- floor(4/(1 + exp(- state$mood_raw))) + 1  
+      state$mood <- floor(4/(1 + exp(- state$mood_raw / 10))) + 1  
     })
     invalidateLater(30000)   # update in 30 seconds or so
   })
