@@ -74,6 +74,7 @@ sentiment <- function(x)
   comments <- clean(Reduce(paste, Map(function(y) {z <- item(y, FALSE); paste(z$text, z$title)}, kids)))
   v <- unlist(strsplit(comments, " "))
   score <- sum(match(v, words$positive, 0) > 0) - sum(match(v, words$negative, 0) > 0)
+  if(is.null(score)) score <- 0
   list(score=score, comments=comments)
 }
 
@@ -169,7 +170,7 @@ server <- function(input, output)
            t0 <- proc.time()
            k <- 0
            withProgress({
-             for(j in head(which(i), 5))  # limit updates to 5 at a time 'cause it's so slow
+             for(j in head(which(i), 10))  # limit updates to at most 10 at a time 'cause it's so slow
              {
                state$stories[[j]] <- item(id[j])
                incProgress(1)
@@ -193,9 +194,11 @@ server <- function(input, output)
     if(!is.null(input$plot_click))
     {
       i <- which.min((state$xy$x - input$plot_click$x)^2 + (state$xy$y - input$plot_click$y)^2)
+      snmt <- state$stories[[i]]$sentiment
+      if(is.null(snmt)) snmt <- 0
       HTML(sprintf("<h2>%s</h2><h3><a target='_blank' href='%s'>%s</a></h3><h3>Top ranked comments sentiment: %d</h3>",
                    state$stories[[i]]$raw_title,
-                   state$stories[[i]]$url, state$stories[[i]]$url, state$stories[[i]]$sentiment)
+                   state$stories[[i]]$url, state$stories[[i]]$url, snmt)
       )
     }
   })
@@ -209,7 +212,7 @@ output$ui_rate <- renderUI({
   HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: blue; font-size: 32px;'>%0.3f total posts / minute</div>", state$rate))
 })
 output$ui_mood <- renderUI({
-  HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: #AA9900; font-size: 32px;'>%s (%d)</div>", mood[state$mood], state$mood_raw))
+  HTML(sprintf("<div style='font-weight: bold; text-align: center; color: white; background-color: #AA9900; font-size: 32px;'>mood: %d (%s)</div>", state$mood_raw, mood[state$mood]))
 })
 
 }
