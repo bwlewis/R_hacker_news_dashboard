@@ -186,8 +186,8 @@ server <- function(input, output)
       }
       # update the current overall mood
       state$mood_raw <- Reduce(sum, Map(function(x) x$sentiment, state$stories))
-      if(state$mood_raw < 0) state$mood_raw <- state$mood_raw / 10
-      state$mood <- floor(6/(1 + exp(- state$mood_raw))) + 1  
+      if(state$mood_raw < 0) state$mood_raw <- state$mood_raw / 5
+      state$mood <- floor(6/(1 + exp(- state$mood_raw) / 5)) + 1
     })
     invalidateLater(30000)   # update in 30 seconds or so
   })
