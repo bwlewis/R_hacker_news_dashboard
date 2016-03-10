@@ -27,7 +27,7 @@ N <- 100
 COMMENT_LIMIT <- 20
 # Initialize
 # Sentiment scale
-mood <- c("aggro", "cheesed off", "cranky", "chill", "amped", "stoked", "woot")
+mood <- c("aggro", "cheesed off", "cranky", "chill", "amped", "stoked", "w00t")
 state <- reactiveValues(stories=top, # loaded from example.rdata to get started
                         mood=4,
                         mood_raw=0,
