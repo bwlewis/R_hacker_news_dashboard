@@ -136,7 +136,7 @@ ui <- pageWithSidebar(
         sidebarPanel(
           uiOutput("ui_rate"),
           uiOutput("ui_mood"),
-          dygraphOutput("dygraph"),
+          dygraphOutput("dygraph", height=200),
           sliderInput("nclust", "Number of clusters:", min=3, max=7, value=5),
           uiOutput("links"),
           uiOutput("info")
@@ -157,6 +157,7 @@ server <- function(input, output)
       # wait a while to begin the (sometimes slow) update process
       update <- nrow(state$rate_history) > 1
       state$rate <- 60 * (id - state$latest) / dt
+      state$latest <- id
       state$time <- time
       state$rate_history$dt <- state$rate_history$dt - dt / 60  # (in approx minutes)
       state$rate_history <- rbind(state$rate_history, data.frame(dt=0, rate=state$rate))
