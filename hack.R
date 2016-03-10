@@ -158,7 +158,7 @@ server <- function(input, output)
       update <- nrow(state$rate_history) > 1
       state$rate <- 60 * (id - state$latest) / dt
       state$time <- time
-      state$rate_history$dt <- state$rate_history$dt - dt/60  # (in minutes)
+      state$rate_history$dt <- state$rate_history$dt - dt / 60  # (in approx minutes)
       state$rate_history <- rbind(state$rate_history, data.frame(dt=0, rate=state$rate))
       if(nrow(state$rate_history) > 100) state$rate_history <- tail(state$rate_history, 100)
       # update the top news stories
@@ -186,7 +186,7 @@ server <- function(input, output)
       }
       # update the current overall mood
       state$mood_raw <- Reduce(sum, Map(function(x) x$sentiment, state$stories))
-      state$mood <- floor(4/(1 + exp(- state$mood_raw / 10))) + 1  
+      state$mood <- floor(4/(1 + exp(- state$mood_raw / 5))) + 1  
     })
     invalidateLater(30000)   # update in 30 seconds or so
   })
